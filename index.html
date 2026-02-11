@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>해외출장 통합 관리 시스템 (HR Linked)</title>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Firebase SDK (v9 Modular) -->
+    <script type="module">
+        import { initializeApp, getApp, getApps } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, serverTimestamp, collectionGroup } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-analytics.js";
+
+        window.firebaseModules = {
+            initializeApp, getApp, getApps, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged,
+            getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, serverTimestamp, collectionGroup,
+            getAnalytics
+        };
+    </script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: { corp: { 50: '#f0f4f8', 100: '#d9e2ec', 500: '#102a43', 600: '#243b53', 900: '#829ab1' }, brand: { 500: '#3366FF', 600: '#254EDB' } },
+                    fontSize: { 'xxs': '0.65rem' },
+                    animation: { 'fade-in': 'fadeIn 0.5s ease-out', 'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite' }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body { font-family: 'Noto Sans KR', sans-serif; background-color: #f1f5f9; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        .dashboard-card { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+        .dashboard-card:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }
+        .bg-pattern { background-image: radial-gradient(#e2e8f0 1px, transparent 1px); background-size: 20px 20px; }
+        .map-dot { transition: all 0.3s ease; }
+        .map-dot:hover { transform: scale(1.5); z-index: 50; }
+        .bar-grow { animation: growHeight 1s ease-out forwards; transform-origin: bottom; }
+        @keyframes growHeight { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+        @keyframes pulse-green { 0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); } 70% { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); } 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); } }
+        .status-dot-active { animation: pulse-green 2s infinite; }
+    </style>
+</head>
+<body class="h-screen overflow-hidden text-slate-800">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { initializeApp, getApp, getApps, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged,
+                getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, serverTimestamp, collectionGroup, getAnalytics } = window.firebaseModules;
+
+        // [Config 1] 출장 관리 시스템 (Main DB)
+        let firebaseConfigMain;
+        if (typeof window.__firebase_config !== 'undefined' && window.__firebase_config) {
+            firebaseConfigMain = JSON.parse(window.__firebase_config);
+        } else {
+            firebaseConfigMain = {
+                apiKey: "AIzaSyCccieGo7BmrMq4yWOhVARpR9tclp1Lmng",
+                authDomain: "global-mobility-system.firebaseapp.com",
+                projectId: "global-mobility-system", 
+                storageBucket: "global-mobility-system.firebasestorage.app",
+                messagingSenderId: "302753143380",
+                appId: "1:302753143380:web:8f0fa0051151b8d813abc1",
+                measurementId: "G-FDVV21NR69"
+            };
+        }
+
+        // [Config 2] HR Manager (Source DB)
+        const firebaseConfigHR = {
+            apiKey: "AIzaSyDm0qnGzq8P3zBBqW_4qjlMd9aq-QKrDyU",
+            authDomain: "hr-manager-6635c.firebaseapp.com",
+            projectId: "hr-manager-6635c",
+            storageBucket: "hr-manager-6635c.firebasestorage.app",
+            messagingSenderId: "796639392690",
+            appId: "1:796639392690:web:f218aa1f65c3b01518aaab"
+        };
+
+        // Initialize Main App
+        const app = getApps().length === 0 ? initializeApp(firebaseConfigMain) : getApp(); 
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = window.__app_id || 'default-app-id';
+
+        // Initialize HR App (Dual Engine)
+        let hrApp, hrDb, hrAuth;
+        try {
+            hrApp = getApps().find(a => a.name === "hrApp") || initializeApp(firebaseConfigHR, "hrApp");
+            hrDb = getFirestore(hrApp);
+            hrAuth = getAuth(hrApp);
+        } catch (e) { console.error("HR App Init Failed:", e); }
+
+        const formatMoney = (amount) => amount ? new Intl.NumberFormat('ko-KR').format(amount) : '0';
+        const getDaysRemaining = (dateStr) => {
+            if (!dateStr) return -999;
+            const diff = new Date(dateStr) - new Date();
+            return Math.ceil(diff / (1000 * 60 * 60 * 24));
+        };
+        const getCityCoords = (city) => {
+            const COORDS = { 'ICN': {top:38,left:82}, 'SEOUL':{top:38,left:82}, 'NRT':{top:38,left:86}, 'TOKYO':{top:38,left:86}, 'PEK':{top:36,left:78}, 'SIN':{top:58,left:76}, 'LHR':{top:26,left:48}, 'CDG':{top:29,left:49}, 'JFK':{top:34,left:26}, 'LAX':{top:39,left:14}, 'SFO':{top:37,left:13}, 'DXB':{top:44,left:63}, 'HAN':{top:45,left:77}, 'SGN':{top:52,left:78}, 'SYD':{top:80,left:89}, 'FRA':{top:28,left:50}, 'MUC':{top:29,left:51}, 'BCN':{top:32,left:48}, 'FCO':{top:33,left:51}, 'IST':{top:34,left:56} };
+            if (!city) return { top: 45, left: 50 };
+            const key = city.toUpperCase().replace(/[^A-Z]/g, '');
+            for (const [k, v] of Object.entries(COORDS)) if (key.includes(k) || k.includes(key)) return v;
+            return { top: 45, left: 50 };
+        };
+        const downloadCSV = (data, filename) => {
+            const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + data.map(e => e.join(",")).join("\n");
+            const link = document.createElement("a");
+            link.href = encodeURI(csvContent);
+            link.download = filename;
+            document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        };
+        const Badge = ({ children, color = 'gray' }) => {
+            const colors = { gray: 'bg-gray-100 text-gray-700 border-gray-200', blue: 'bg-blue-50 text-blue-700 border-blue-200', green: 'bg-emerald-50 text-emerald-700 border-emerald-200', red: 'bg-rose-50 text-rose-700 border-rose-200', yellow: 'bg-amber-50 text-amber-700 border-amber-200', purple: 'bg-purple-50 text-purple-700 border-purple-200', orange: 'bg-orange-50 text-orange-700 border-orange-200 font-bold' };
+            return <span className={`px-2 py-0.5 rounded text-xs border ${colors[color]}`}>{children}</span>;
+        };
+
+        function App() {
+            const [user, setUser] = React.useState(null);
+            const [view, setView] = React.useState('dashboard');
+            const [employees, setEmployees] = React.useState([]);
+            const [trips, setTrips] = React.useState([]);
+            const [empModal, setEmpModal] = React.useState({ open: false, data: null });
+            const [tripModal, setTripModal] = React.useState({ open: false, data: null });
+            const [dbStatus, setDbStatus] = React.useState('connecting'); 
+            const [selectedYear, setSelectedYear] = React.useState(new Date().getFullYear());
+
+            const availableYears = React.useMemo(() => {
+                const years = new Set(trips.map(t => t.startDate ? parseInt(t.startDate.split('-')[0]) : null).filter(Boolean));
+                years.add(new Date().getFullYear());
+                return Array.from(years).sort((a,b) => b-a);
+            }, [trips]);
+            const filteredTripsByYear = React.useMemo(() => trips.filter(t => t.startDate && t.startDate.startsWith(selectedYear.toString())), [trips, selectedYear]);
+
+            React.useEffect(() => {
+                const initAuth = async () => {
+                    try {
+                        if(window.__initial_auth_token) await signInWithCustomToken(auth, window.__initial_auth_token);
+                        else await signInAnonymously(auth);
+                    } catch(e) { await signInAnonymously(auth); }
+
+                    if(hrAuth) {
+                        try { await signInAnonymously(hrAuth); console.log("🔐 HR Engine Authenticated"); } catch(e) { console.error("HR Auth Fail:", e); }
+                    }
+                };
+                initAuth();
+
+                return onAuthStateChanged(auth, (u) => {
+                    setUser(u);
+                    if (u) {
+                        // 1. Trips Data (Main DB)
+                        const unsubTrip = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'trips_pro')), 
+                            (s) => setTrips(s.docs.map(d => ({id: d.id, ...d.data()})).sort((a, b) => (b.startDate || '').localeCompare(a.startDate || '')))
+                        );
+
+                        // 2. Employees Data (HR DB - Dual Engine)
+                        let unsubEmp = () => {};
+                        if (hrDb) {
+                            // Using collectionGroup to fetch ALL employees from ANY path
+                            const q = query(collectionGroup(hrDb, 'employees'));
+                            unsubEmp = onSnapshot(q, (s) => {
+                                const rawData = s.docs.map(d => {
+                                    const r = d.data();
+                                    return {
+                                        id: r.id || d.id,
+                                        name: r.name || r.employeeName || '미입력',
+                                        dept: r.dept || r.department || '미배정',
+                                        position: r.position || r.rank || '사원',
+                                        passport: r.passport || { number: '', expiry: '', country: 'KR' },
+                                        visas: r.visas || []
+                                    };
+                                });
+                                // Deduplicate by ID
+                                const unique = Array.from(new Map(rawData.map(item => [item.id, item])).values());
+                                unique.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+                                setEmployees(unique);
+                                setDbStatus('online');
+                            }, (e) => {
+                                console.error("HR Sync Error:", e);
+                                setDbStatus('error');
+                            });
+                        }
+                        return () => { unsubTrip(); unsubEmp(); };
+                    }
+                });
+            }, []);
+
+            const handleSaveEmployee = (e) => { e.preventDefault(); alert("HR 연동 모드: 데이터 수정은 HR Manager 앱에서 수행해주세요."); };
+            const handleSaveTripData = async (data, id) => {
+                const payload = { ...data, updatedAt: serverTimestamp() };
+                try {
+                    if(id) await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'trips_pro', id), payload);
+                    else await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'trips_pro'), payload);
+                    setTripModal({ open: false, data: null });
+                } catch (err) { alert("저장 실패: " + err.message); }
+            };
+            const deleteItem = async (col, id) => {
+                if(col === 'employees_pro') return alert("HR 데이터는 삭제 불가합니다.");
+                if(confirm('삭제하시겠습니까?')) { try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', col, id)); } catch(err) { alert("삭제 실패"); } }
+            };
+
+            // --- Views (Restored Original Design) ---
+            const Dashboard = () => {
+                const totalActual = filteredTripsByYear.reduce((acc, t) => acc + (t.cost?.actual || 0), 0);
+                const activeTrips = trips.filter(t => { const today = new Date().toISOString().split('T')[0]; return t.startDate <= today && t.endDate >= today && t.ticketingStatus !== 'cancelled'; });
+                const urgentChanges = trips.filter(t => t.ticketingStatus === 'change_req');
+                const warningEmps = employees.filter(e => e.passport?.expiry && getDaysRemaining(e.passport.expiry) < 180);
+                const monthlyData = filteredTripsByYear.reduce((acc, t) => { if (!t.startDate) return acc; const m = t.startDate.split('-')[1]; acc[m] = (acc[m] || 0) + (t.cost?.actual || 0); return acc; }, {});
+                const months = ['01','02','03','04','05','06','07','08','09','10','11','12'];
+                const maxMonthVal = Math.max(...Object.values(monthlyData), 1);
+                const airlineData = filteredTripsByYear.flatMap(t => t.segments || []).reduce((acc, seg) => { const al = seg.airline || '기타'; acc[al] = (acc[al] || 0) + 1; return acc; }, {});
+                const sortedAirlines = Object.entries(airlineData).sort((a,b) => b[1] - a[1]).slice(0, 4);
+                const totalSegments = Object.values(airlineData).reduce((a,b)=>a+b, 0) || 1;
+                const purposeData = filteredTripsByYear.reduce((acc, t) => { const p = t.purpose?.split(' ')[0] || '기타'; acc[p] = (acc[p] || 0) + 1; return acc; }, {});
+                const sortedPurpose = Object.entries(purposeData).sort((a,b) => b[1] - a[1]).slice(0, 5);
+                const maxPurposeVal = sortedPurpose.length > 0 ? sortedPurpose[0][1] : 1;
+
+                return (
+                    <div className="p-6 space-y-6 animate-fade-in max-w-[1600px] mx-auto">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between"><div><div className="text-xs text-slate-500 font-bold uppercase mb-1">{selectedYear} 총 지출</div><div className="text-2xl font-bold text-slate-800">₩ {formatMoney(totalActual)}</div></div><div className="p-3 bg-blue-50 text-blue-600 rounded-lg"><i className="fas fa-coins text-xl"></i></div></div>
+                            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between"><div><div className="text-xs text-slate-500 font-bold uppercase mb-1">현재 해외 체류</div><div className="text-2xl font-bold text-slate-800">{activeTrips.length} <span className="text-base font-normal text-slate-400">명</span></div></div><div className="p-3 bg-green-50 text-green-600 rounded-lg"><i className="fas fa-globe-americas text-xl"></i></div></div>
+                            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between"><div><div className="text-xs text-slate-500 font-bold uppercase mb-1">변경/재발권 필요</div><div className={`text-2xl font-bold ${urgentChanges.length>0?'text-orange-600':'text-slate-800'}`}>{urgentChanges.length} <span className="text-base font-normal text-slate-400">건</span></div></div><div className="p-3 bg-orange-50 text-orange-600 rounded-lg"><i className="fas fa-exchange-alt text-xl"></i></div></div>
+                            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between"><div><div className="text-xs text-slate-500 font-bold uppercase mb-1">여권 만료 임박</div><div className="text-2xl font-bold text-red-600">{warningEmps.length} <span className="text-base font-normal text-slate-400">명</span></div></div><div className="p-3 bg-red-50 text-red-600 rounded-lg"><i className="fas fa-passport text-xl"></i></div></div>
+                        </div>
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-auto lg:h-[500px]">
+                            <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col">
+                                <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center"><i className="fas fa-chart-line text-blue-500 mr-2"></i> {selectedYear}년 월별 지출 추이</h3>
+                                <div className="flex-1 flex items-end justify-between space-x-4 px-4 pb-2 relative"><div className="absolute inset-0 border-b border-l border-slate-100 -z-10"></div>{months.map(month => { const val = monthlyData[month] || 0; const heightPct = maxMonthVal > 0 ? (val / maxMonthVal) * 80 : 0; return (<div key={month} className="flex flex-col items-center flex-1 group"><div className="relative w-full flex justify-center items-end h-[300px]"><div className="w-8 md:w-12 bg-blue-500 rounded-t-sm bar-grow hover:bg-blue-600 transition-colors relative" style={{ height: `${heightPct}%` }}>{val > 0 && <div className="opacity-0 group-hover:opacity-100 absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-xs px-2 py-1 rounded whitespace-nowrap z-10 transition-opacity">₩ {formatMoney(val)}</div>}</div></div><div className="mt-3 text-xs font-medium text-slate-500">{month}월</div></div>) })}</div>
+                            </div>
+                            <div className="flex flex-col gap-6">
+                                <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm p-5"><h3 className="text-sm font-bold text-slate-700 mb-4 uppercase tracking-wide">항공사 점유율</h3><div className="space-y-3">{sortedAirlines.length === 0 && <p className="text-xs text-slate-400">데이터 없음</p>}{sortedAirlines.map(([airline, count], i) => (<div key={airline} className="flex items-center"><div className="w-8 font-bold text-slate-600 text-xs">{airline}</div><div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden mx-2"><div className={`h-full rounded-full ${['bg-blue-500','bg-sky-400','bg-indigo-400','bg-purple-400'][i]}`} style={{ width: `${(count/totalSegments)*100}%` }}></div></div><div className="text-xs font-mono text-slate-500 w-8 text-right">{Math.round((count/totalSegments)*100)}%</div></div>))}</div></div>
+                                <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm p-5"><h3 className="text-sm font-bold text-slate-700 mb-4 uppercase tracking-wide">출장 목적</h3><div className="space-y-2">{sortedPurpose.length === 0 && <p className="text-xs text-slate-400">데이터 없음</p>}{sortedPurpose.map(([pur, count]) => (<div key={pur} className="flex justify-between items-center text-xs"><span className="text-slate-600 truncate max-w-[100px]">{pur}</span><div className="flex items-center"><div className="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden mr-2"><div className="h-full bg-emerald-400 rounded-full" style={{ width: `${(count/maxPurposeVal)*100}%` }}></div></div><span className="font-bold text-slate-700">{count}</span></div></div>))}</div></div>
+                            </div>
+                        </div>
+                        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6"><h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center"><i className="fas fa-bell text-orange-500 mr-2"></i> 긴급 이슈 및 최근 변경 이력</h3><div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">{urgentChanges.map(t => { const emp = employees.find(e => e.id === t.empId); const lastChange = t.changes?.[t.changes.length-1]; return (<div key={t.id} className="bg-orange-50 border border-orange-100 rounded-lg p-4 flex flex-col justify-between"><div><div className="flex justify-between items-start mb-2"><span className="font-bold text-slate-800">{emp?.name}</span><Badge color="orange">조치필요</Badge></div><div className="text-xs text-slate-600 mb-1">{t.project}</div><div className="text-xs text-slate-500"><i className="fas fa-plane mr-1"></i> {t.startDate} ~ {t.endDate}</div></div>{lastChange && <div className="mt-3 pt-2 border-t border-orange-200 text-xs text-orange-800 font-medium truncate">"{lastChange.note}"</div>}<button onClick={() => setTripModal({open:true, data:t})} className="mt-3 w-full bg-white border border-orange-200 text-orange-700 text-xs py-1.5 rounded hover:bg-orange-100 transition">상세 확인</button></div>) })}{urgentChanges.length === 0 && <div className="col-span-full py-8 text-center text-slate-400 bg-slate-50 rounded border border-dashed border-slate-200">현재 조치가 필요한 긴급 이슈가 없습니다.</div>}</div></div>
+                    </div>
+                );
+            };
+
+            const GlobalMap = () => {
+                const activeTrips = trips.filter(t => { const today = new Date().toISOString().split('T')[0]; return t.startDate <= today && t.endDate >= today && t.ticketingStatus !== 'cancelled'; });
+                return (
+                    <div className="p-6 h-full flex flex-col animate-fade-in max-w-7xl mx-auto w-full">
+                        <div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-bold text-gray-800">실시간 위치 관제</h2><div className="bg-white px-4 py-2 rounded-lg shadow-sm text-sm border border-gray-200"><span className="text-green-600 font-bold mr-1">●</span> 출장 중: {activeTrips.length}명</div></div>
+                        <div className="bg-[#102a43] rounded-xl shadow-lg flex-1 relative overflow-hidden border border-slate-700"><svg className="absolute inset-0 w-full h-full text-slate-700 opacity-40" viewBox="0 0 100 60" preserveAspectRatio="none"><path fill="currentColor" d="M10,20 Q15,10 20,20 T30,20 T40,25 T50,20 T60,25 T70,20 T80,25 T90,20 V50 H10 Z" /><rect x="10" y="15" width="20" height="15" rx="2" /><rect x="40" y="10" width="30" height="20" rx="2" /><rect x="75" y="15" width="15" height="15" rx="2" /></svg><div className="absolute inset-0 bg-[url('https://upload.wikimedia.org/wikipedia/commons/8/80/World_map_-_low_resolution.svg')] bg-cover bg-center opacity-30 mix-blend-overlay"></div>{activeTrips.map(t => { const emp = employees.find(e => e.id === t.empId); const dest = t.segments?.[0]?.arr || 'UNKNOWN'; const coords = getCityCoords(dest); return (<div key={t.id} className="absolute map-dot group cursor-pointer" style={{ top: `${coords.top}%`, left: `${coords.left}%` }}><div className="relative"><div className="w-3 h-3 bg-blue-500 rounded-full shadow-[0_0_10px_rgba(59,130,246,0.8)] animate-pulse"></div><div className="absolute -top-1 -left-1 w-5 h-5 bg-blue-400 rounded-full opacity-30 animate-ping"></div><div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-3 w-48 bg-white text-gray-800 text-xs rounded-lg shadow-xl p-3 z-50"><div className="font-bold border-b border-gray-100 pb-1 mb-1">{emp?.name} ({emp?.dept})</div><div className="text-gray-500">목적지: <span className="font-mono font-bold text-blue-600">{dest}</span></div><div className="text-gray-400 mt-1">~ {t.endDate} 귀국</div><div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-white"></div></div></div></div>) })}</div>
+                    </div>
+                );
+            };
+
+            const TripManager = () => {
+                const [searchTerm, setSearchTerm] = React.useState("");
+                const filteredTrips = filteredTripsByYear.filter(t => { const emp = employees.find(e => e.id === t.empId); const searchStr = `${emp?.name} ${t.project} ${t.ticketNo}`.toLowerCase(); return searchStr.includes(searchTerm.toLowerCase()); });
+                const handleExport = () => { const headers = ["이름", "부서", "프로젝트", "목적", "시작일", "종료일", "실비용", "상태", "티켓번호"]; const rows = filteredTrips.map(t => { const emp = employees.find(e => e.id === t.empId); return [ emp?.name||"", emp?.dept||"", t.project||"", t.purpose||"", t.startDate||"", t.endDate||"", t.cost?.actual||0, t.ticketingStatus||"", t.ticketNo||"" ]; }); downloadCSV([headers, ...rows], `출장리스트_${selectedYear}.csv`); };
+
+                return (
+                    <div className="p-6 h-full flex flex-col animate-fade-in max-w-7xl mx-auto w-full">
+                        <div className="flex justify-between items-center mb-6"><div><h2 className="text-2xl font-bold text-gray-800">출장 및 항공권 관리</h2><p className="text-sm text-gray-500">{selectedYear}년도 출장 현황 및 비용 추적</p></div><div className="flex gap-3"><button onClick={handleExport} className="bg-green-600 text-white px-3 py-2 rounded-lg hover:bg-green-700 shadow-sm flex items-center transition text-sm"><i className="fas fa-file-excel mr-2"></i> 엑셀 다운로드</button><div className="relative"><i className="fas fa-search absolute left-3 top-2.5 text-slate-400 text-sm"></i><input type="text" placeholder="검색 (이름, 프로젝트)" className="pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none w-64" value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} /></div><button onClick={() => setTripModal({ open: true, data: null })} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 shadow-sm flex items-center transition"><i className="fas fa-plus mr-2"></i> 신규 기안</button></div></div>
+                        <div className="bg-white border border-gray-200 rounded-lg shadow-sm flex-1 overflow-hidden flex flex-col"><div className="overflow-auto flex-1"><table className="w-full text-sm text-left whitespace-nowrap"><thead className="bg-gray-50 text-gray-600 sticky top-0 z-10"><tr><th className="px-4 py-3 border-b">상태</th><th className="px-4 py-3 border-b">출장자/부서</th><th className="px-4 py-3 border-b">기간</th><th className="px-4 py-3 border-b">항공 여정</th><th className="px-4 py-3 border-b text-right">실비용</th><th className="px-4 py-3 border-b text-center">문서/이력</th><th className="px-4 py-3 border-b text-center">관리</th></tr></thead><tbody className="divide-y divide-gray-100">{filteredTrips.map(t => { const emp = employees.find(e => e.id === t.empId); const statusMap = { 'requested': '발권 요청', 'reserved': '예약 완료', 'ticketed': '발권 완료', 'change_req': '변경/재발권', 'cancelled': '취소', 'planned': '계획됨', 'confirmed': '확정', 'completed': '완료' }; return (<tr key={t.id} className={`hover:bg-gray-50 ${t.ticketingStatus==='change_req'?'bg-orange-50':''}`}><td className="px-4 py-3"><Badge color={t.ticketingStatus==='ticketed'?'green':t.ticketingStatus==='change_req'?'orange':t.ticketingStatus==='cancelled'?'gray':'red'}>{statusMap[t.ticketingStatus] || t.ticketingStatus}</Badge></td><td className="px-4 py-3"><div className="font-bold">{emp?.name}</div><div className="text-xs text-gray-500">{emp?.dept}</div></td><td className="px-4 py-3"><div className="text-gray-900">{t.startDate} ~ {t.endDate}</div>{t.changes?.length>0 && <div className="text-xs text-orange-600 mt-1"><i className="fas fa-history"></i> {t.changes.length}건 변경</div>}</td><td className="px-4 py-3"><div className="flex flex-col gap-1">{t.segments?.map((s,i)=><div key={i} className="text-xs text-gray-600"><span className="font-mono font-bold">{s.airline}{s.flightNo}</span> {s.dep}→{s.arr}</div>)}</div></td><td className="px-4 py-3 text-right font-bold text-blue-900">₩ {formatMoney(t.cost?.actual)}</td><td className="px-4 py-3 text-center"><div className="flex flex-col gap-1 items-center">{t.changes?.length>0 && <span className="bg-orange-100 text-orange-700 px-2 py-0.5 rounded text-xxs font-bold">{t.changes.length} 변경</span>}{t.documents?.length>0 && <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xxs font-bold"><i className="fas fa-paperclip"></i> {t.documents.length} 파일</span>}</div></td><td className="px-4 py-3 text-center"><button onClick={()=>setTripModal({open:true, data:t})} className="text-blue-600 p-1 mr-2 hover:bg-blue-50 rounded"><i className="fas fa-edit"></i></button><button onClick={()=>deleteItem('trips_pro', t.id)} className="text-gray-400 hover:text-red-600 p-1 hover:bg-red-50 rounded"><i className="fas fa-trash"></i></button></td></tr>); })}</tbody></table></div></div>
+                    </div>
+                );
+            };
+
+            const EmployeeManager = () => {
+                const [searchTerm, setSearchTerm] = React.useState("");
+                const filteredEmps = employees.filter(e => `${e.name} ${e.dept} ${e.passport?.number}`.toLowerCase().includes(searchTerm.toLowerCase()));
+                return (
+                    <div className="p-6 h-full flex flex-col animate-fade-in max-w-7xl mx-auto w-full">
+                        <div className="flex justify-between items-center mb-6"><div><h2 className="text-2xl font-bold text-gray-800">임직원 여권/비자 관리</h2><p className="text-sm text-gray-500">여권 만료일 및 비자 현황 모니터링</p></div><div className="flex gap-3"><div className="relative"><i className="fas fa-search absolute left-3 top-2.5 text-slate-400 text-sm"></i><input type="text" placeholder="이름, 부서, 여권번호 검색" className="pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none w-64" value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} /></div><button onClick={() => setEmpModal({ open: true, data: null })} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 shadow-sm flex items-center transition"><i className="fas fa-user-plus mr-2"></i> 임직원 등록</button></div></div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-y-auto pb-10">{filteredEmps.map(emp => { const daysLeft = getDaysRemaining(emp.passport?.expiry); const ppStatus = daysLeft < 0 ? 'expired' : daysLeft < 180 ? 'warning' : 'ok'; return (<div key={emp.id} className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 hover:shadow-md transition-all relative overflow-hidden group"><div className="flex items-start justify-between mb-4"><div className="flex items-center"><div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 font-bold mr-4 text-lg border border-slate-200">{emp.name[0]}</div><div><h3 className="font-bold text-gray-900 text-lg">{emp.name}</h3><p className="text-xs text-gray-500">{emp.dept} / {emp.position}</p></div></div><div className="flex"><button onClick={() => setEmpModal({open:true, data: emp})} className="text-gray-400 hover:text-blue-600 p-2 hover:bg-blue-50 rounded-full transition mr-1" title="수정"><i className="fas fa-eye"></i></button></div></div><div className={`rounded-lg p-3 mb-3 border relative overflow-hidden ${ppStatus === 'expired' ? 'bg-red-50 border-red-200' : ppStatus === 'warning' ? 'bg-orange-50 border-orange-200' : 'bg-slate-50 border-slate-200'}`}>{ppStatus === 'warning' && <div className="absolute top-0 right-0 bg-orange-200 text-orange-800 text-xxs px-2 py-0.5 rounded-bl font-bold">갱신 필요</div>}<div className="flex justify-between items-end"><div><div className="text-xxs text-gray-500 uppercase tracking-wide">여권 번호</div><div className="font-mono font-bold text-gray-800">{emp.passport?.number || '-'}</div></div><div className="text-right"><div className="text-xxs text-gray-500 uppercase tracking-wide">만료일</div><div className={`font-mono font-bold ${ppStatus !== 'ok' ? 'text-red-600' : 'text-gray-800'}`}>{emp.passport?.expiry || '-'}</div></div></div></div><div className="space-y-2"><div className="text-xs font-bold text-gray-400 uppercase tracking-wider">보유 비자</div>{emp.visas && emp.visas.length > 0 ? (emp.visas.map((v, idx) => (<div key={idx} className="flex justify-between items-center text-xs bg-gray-50 p-2 rounded border border-gray-100"><div className="flex items-center"><span className="font-medium text-gray-700 mr-2">{v.country}</span><span className="text-gray-500 text-xxs bg-white border px-1 rounded">{v.type}</span></div><span className="font-mono text-gray-600">{v.expiry}</span></div>))) : <div className="text-xs text-gray-300 italic py-1">비자 정보 없음</div>}</div></div>); })}</div>
+                    </div>
+                );
+            };
+
+            const TripFormModal = ({ onClose, onSave, data, employees }) => {
+                const [segments, setSegments] = React.useState(data?.segments?.map(s => ({...s, id: Math.random().toString(36).substr(2, 9)})) || [{id: 'init', dep: '', arr: '', date: '', airline: '', flightNo: '', pnr: ''}]);
+                const [changeLogs, setChangeLogs] = React.useState(data?.changes || []);
+                const [documents, setDocuments] = React.useState(data?.documents || []);
+                const [newChange, setNewChange] = React.useState({date: '', type: '일정변경', note: ''});
+
+                const handleFileChange = (e) => { const file = e.target.files[0]; if(!file) return; const reader = new FileReader(); reader.onload = (evt) => setDocuments([...documents, { id: Date.now(), name: file.name, type: 'E-Ticket', date: new Date().toISOString().split('T')[0], data: evt.target.result }]); reader.readAsDataURL(file); };
+                const updateSegment = (id, field, value) => { setSegments(prev => prev.map(s => s.id === id ? { ...s, [field]: value } : s)); };
+                const handleSubmit = (e) => { e.preventDefault(); const form = new FormData(e.target); const cleanSegments = segments.map(({id, ...rest}) => rest); onSave({ empId: form.get('empId'), project: form.get('project'), purpose: form.get('purpose'), startDate: form.get('startDate'), endDate: form.get('endDate'), cost: { actual: Number(form.get('cost_act')), currency: form.get('currency') }, ticketingStatus: form.get('ticketingStatus'), ticketNo: form.get('ticketNo'), segments: cleanSegments, changes: changeLogs, documents: documents }, data?.id); };
+                const addChangeLog = () => { if(!newChange.date || !newChange.note) return alert("입력 필요"); setChangeLogs([...changeLogs, newChange]); setNewChange({date: '', type: '일정변경', note: ''}); };
+                const addSeg = () => setSegments([...segments, {id: Math.random().toString(36).substr(2, 9), dep: '', arr: '', date: '', airline: '', flightNo: '', pnr: ''}]);
+                const removeSeg = (id) => setSegments(segments.filter(s => s.id !== id));
+
+                return (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"><div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[95vh] overflow-y-auto"><div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50 rounded-t-xl sticky top-0 z-10"><h3 className="font-bold text-lg text-gray-800">출장 및 항공권 통합 관리</h3><button onClick={onClose} className="text-gray-400 hover:text-gray-600"><i className="fas fa-times text-xl"></i></button></div><form onSubmit={handleSubmit} className="p-6 grid grid-cols-1 lg:grid-cols-3 gap-8"><div className="lg:col-span-1 space-y-5 border-r border-gray-100 pr-0 lg:pr-6"><div className="space-y-1"><label className="text-xs font-bold text-gray-500 uppercase">출장자</label><select name="empId" required defaultValue={data?.empId} className="w-full border rounded p-2"><option value="">선택</option>{employees.map(e=><option key={e.id} value={e.id}>{e.name} ({e.dept})</option>)}</select></div><div className="space-y-1"><label className="text-xs font-bold text-gray-500 uppercase">프로젝트</label><input required name="project" defaultValue={data?.project} className="w-full border rounded p-2" /></div><div className="space-y-1"><label className="text-xs font-bold text-gray-500 uppercase">목적</label><input required name="purpose" defaultValue={data?.purpose} className="w-full border rounded p-2" /></div><div className="grid grid-cols-2 gap-2"><input required type="date" name="startDate" defaultValue={data?.startDate} className="border rounded p-2" /><input required type="date" name="endDate" defaultValue={data?.endDate} className="border rounded p-2" /></div><div className="bg-blue-50 p-4 rounded border border-blue-100"><label className="text-xs font-bold text-blue-800">실비용 (Actual Cost)</label><input type="number" name="cost_act" defaultValue={data?.cost?.actual} className="w-full border border-blue-300 rounded p-2 text-right font-bold" /></div><div><label className="text-xs font-bold text-gray-500 uppercase">상태</label><select name="ticketingStatus" defaultValue={data?.ticketingStatus||'requested'} className="w-full border rounded p-2"><option value="requested">발권 요청</option><option value="ticketed">발권 완료</option><option value="change_req">⚠️ 변경/재발권 필요</option><option value="cancelled">취소</option></select></div><div className="pt-4 border-t"><label className="text-xs font-bold text-gray-500 uppercase">변경 이력</label><div className="bg-gray-50 border p-2 max-h-32 overflow-y-auto mb-2 space-y-2">{changeLogs.map((l,i)=><div key={i} className="bg-white border p-2 text-xs"><b>{l.date}</b> <span className="text-orange-600">{l.type}</span><div className="text-gray-600">{l.note}</div></div>)}</div><div className="bg-orange-50 p-2 rounded border border-orange-100 grid gap-1"><div className="grid grid-cols-2 gap-1"><input type="date" value={newChange.date} onChange={e=>setNewChange({...newChange,date:e.target.value})} className="border text-xs p-1"/><select value={newChange.type} onChange={e=>setNewChange({...newChange,type:e.target.value})} className="border text-xs p-1"><option>일정변경</option><option>재발권</option><option>단순메모</option></select></div><input value={newChange.note} onChange={e=>setNewChange({...newChange,note:e.target.value})} className="border text-xs p-1 w-full" placeholder="내용"/><button type="button" onClick={addChangeLog} className="bg-orange-100 text-orange-700 text-xs font-bold py-1 w-full">추가</button></div></div></div><div className="lg:col-span-2 space-y-6 flex flex-col h-full"><div><div className="flex justify-between items-center mb-2"><h4 className="font-bold text-gray-800">항공 여정</h4><button type="button" onClick={addSeg} className="text-xs bg-blue-50 text-blue-600 px-3 py-1 rounded font-bold">+ 추가</button></div><div className="space-y-2 max-h-[300px] overflow-y-auto pr-2">{segments.map((s, i) => (<div key={s.id} className="bg-gray-50 border border-gray-200 rounded p-3 relative group mb-2"><div className="grid grid-cols-6 gap-2 mb-2"><input value={s.dep} onChange={e=>updateSegment(s.id, 'dep', e.target.value)} placeholder="출발(ICN)" className="col-span-1 border rounded p-1 text-xs font-bold uppercase" /><input value={s.arr} onChange={e=>updateSegment(s.id, 'arr', e.target.value)} placeholder="도착(JFK)" className="col-span-1 border rounded p-1 text-xs font-bold uppercase" /><input type="date" value={s.date} onChange={e=>updateSegment(s.id, 'date', e.target.value)} className="col-span-2 border rounded p-1 text-xs" /><input value={s.airline} onChange={e=>updateSegment(s.id, 'airline', e.target.value)} placeholder="항공사(KE)" className="col-span-1 border rounded p-1 text-xs uppercase" /><input value={s.flightNo} onChange={e=>updateSegment(s.id, 'flightNo', e.target.value)} placeholder="편명(082)" className="col-span-1 border rounded p-1 text-xs uppercase" /></div><div className="grid grid-cols-1"><input value={s.pnr} onChange={e=>updateSegment(s.id, 'pnr', e.target.value)} placeholder="예약번호 (PNR)" className="w-full border rounded p-1 text-xs text-blue-600 font-mono" /></div>{segments.length > 1 && (<button type="button" onClick={() => removeSeg(s.id)} className="absolute -top-2 -right-2 bg-red-100 text-red-500 rounded-full w-5 h-5 flex items-center justify-center hover:bg-red-200 shadow-sm z-10"><i className="fas fa-times text-xs"></i></button>)}</div>))}</div></div><div className="flex-1 bg-slate-50 rounded-lg border border-slate-200 p-4 flex flex-col"><div className="flex justify-between items-center mb-3"><h4 className="font-bold text-slate-700"><i className="fas fa-folder-open mr-2"></i> 문서 보관함</h4><label className="cursor-pointer bg-slate-200 px-3 py-1 rounded text-xs font-bold"><i className="fas fa-upload mr-1"></i> 파일 선택<input type="file" className="hidden" onChange={handleFileChange} /></label></div><div className="flex-1 overflow-y-auto space-y-2 min-h-[120px]">{documents.map(d=><div key={d.id} className="bg-white border rounded p-2 flex justify-between items-center"><div className="flex items-center overflow-hidden"><i className={`fas ${d.name.endsWith('.pdf')?'fa-file-pdf':'fa-file-image'} text-red-500 mr-2`}></i><span className="text-xs truncate">{d.name}</span></div><div className="flex gap-2"><a href={d.data} download={d.name} className="text-blue-500"><i className="fas fa-download"></i></a><button type="button" onClick={()=>setDocuments(documents.filter(x=>x.id!==d.id))} className="text-red-400"><i className="fas fa-trash"></i></button></div></div>)}</div></div><div className="flex justify-end pt-4 border-t gap-3"><button type="button" onClick={onClose} className="px-6 py-2 rounded border">취소</button><button type="submit" className="bg-blue-600 text-white px-8 py-2 rounded font-bold">완료</button></div></div></form></div></div>
+                );
+            };
+
+            return (
+                <div className="flex h-screen w-full bg-[#f0f2f5]">
+                    {/* Sidebar */}
+                    <aside className="w-20 lg:w-64 bg-[#102a43] text-white flex flex-col flex-shrink-0 shadow-xl z-20 transition-all duration-300">
+                        <div className="p-4 lg:p-6 flex items-center justify-center lg:justify-start border-b border-gray-700 bg-[#0d2237]">
+                            <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center shadow-lg transform rotate-3"><i className="fas fa-plane-departure text-xl text-white"></i></div>
+                            <div className="ml-3 hidden lg:block"><span className="font-bold text-lg tracking-wide block leading-none">Global</span><span className="text-xs text-blue-300 tracking-wider">Mobility System</span></div>
+                        </div>
+                        <nav className="flex-1 py-6 space-y-2">
+                            {[{id:'dashboard',icon:'fas fa-chart-line',label:'경영진 대시보드'},{id:'map',icon:'fas fa-globe-americas',label:'실시간 위치 관제'},{id:'trips',icon:'fas fa-plane',label:'출장 및 항공권'},{id:'employees',icon:'fas fa-users',label:'임직원 관리'}].map(item => (
+                                <button key={item.id} onClick={() => setView(item.id)} className={`w-full flex items-center px-6 py-3 text-sm font-medium transition-all duration-200 border-l-4 ${view === item.id ? 'bg-[#243b53] border-blue-500 text-white shadow-inner' : 'border-transparent text-gray-400 hover:text-white hover:bg-[#1a2e40]'}`}>
+                                    <i className={`${item.icon} text-lg w-8 text-center`}></i><span className="hidden lg:block">{item.label}</span>
+                                </button>
+                            ))}
+                        </nav>
+                        
+                        {/* 실시간 동기화 상태 표시기 */}
+                        <div className="p-4 border-t border-gray-700 bg-[#0d2237]">
+                            <div className="flex items-center justify-center lg:justify-start">
+                                <div className="relative">
+                                    <div className={`w-2 h-2 rounded-full ${dbStatus === 'online' ? 'bg-green-400 animate-pulse' : dbStatus === 'error' ? 'bg-red-500' : 'bg-yellow-400'} `}></div>
+                                    {dbStatus === 'online' && <div className="absolute top-0 left-0 w-2 h-2 rounded-full bg-green-400 animate-ping opacity-75"></div>}
+                                </div>
+                                <span className={`ml-3 text-xs hidden lg:block font-mono ${dbStatus === 'error' ? 'text-red-400' : 'text-gray-400'}`}>
+                                    {dbStatus === 'online' ? 'HR Manager 연동됨' : dbStatus === 'error' ? '연결 오류' : '연결 중...'}
+                                </span>
+                            </div>
+                        </div>
+                    </aside>
+
+                    {/* Content */}
+                    <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+                        <header className="bg-white shadow-sm h-16 flex items-center justify-between px-8 z-10 border-b border-gray-200">
+                            <h1 className="text-xl font-bold text-gray-800 flex items-center">
+                                {view === 'dashboard' && <><i className="fas fa-chart-pie mr-2 text-gray-400"></i> 경영진 대시보드</>}
+                                {view === 'map' && <><i className="fas fa-satellite-dish mr-2 text-gray-400"></i> 실시간 위치 관제 센터</>}
+                                {view === 'trips' && <><i className="fas fa-list-alt mr-2 text-gray-400"></i> 출장 및 항공권 관리</>}
+                                {view === 'employees' && <><i className="fas fa-address-card mr-2 text-gray-400"></i> 임직원 여권/비자 관리</>}
+                            </h1>
+                            <div className="flex items-center space-x-6">
+                                <div className="flex items-center bg-emerald-50 border border-emerald-100 rounded-full px-4 py-1.5 shadow-sm">
+                                    <span className="relative flex h-2 w-2 mr-2">
+                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                    </span>
+                                    <span className="text-xs font-bold text-emerald-700">Real-time Sync On</span>
+                                </div>
+                                <div className="flex items-center">
+                                    <span className="text-xs font-bold text-gray-500 mr-2 uppercase">조회 연도</span>
+                                    <select value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2">
+                                        {availableYears.map(year => (
+                                            <option key={year} value={year}>{year}년</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div className="text-right hidden md:block"><div className="text-sm font-bold text-gray-800">관리자</div><div className="text-xs text-gray-500">Travel Manager</div></div>
+                                <div className="w-9 h-9 rounded-full bg-slate-800 text-white flex items-center justify-center font-bold shadow-sm">A</div>
+                            </div>
+                        </header>
+
+                        <div className="flex-1 overflow-auto bg-[#f1f5f9] bg-pattern">
+                            {view === 'dashboard' && <Dashboard />}
+                            {view === 'map' && <GlobalMap />}
+                            {view === 'trips' && <TripManager />}
+                            {view === 'employees' && <EmployeeManager />}
+                        </div>
+                        
+                        {/* Modals Implemented Inline */}
+                        {empModal.open && (
+                            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                                <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                                    <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50 rounded-t-xl sticky top-0 z-10">
+                                        <h3 className="font-bold text-lg text-gray-800">임직원 상세 정보 (HR 연동)</h3>
+                                        <button onClick={() => setEmpModal({open:false, data:null})} className="text-gray-400 hover:text-gray-600"><i className="fas fa-times text-xl"></i></button>
+                                    </div>
+                                    <form onSubmit={handleSaveEmployee} className="p-6 space-y-6">
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div className="space-y-1"><label className="text-xs font-bold text-gray-500 uppercase">성명</label><input required name="name" defaultValue={empModal.data?.name} className="w-full border rounded p-2 bg-gray-50" readOnly /></div>
+                                            <div className="space-y-1"><label className="text-xs font-bold text-gray-500 uppercase">사번</label><input name="empId" defaultValue={empModal.data?.empId || empModal.data?.id} className="w-full border rounded p-2 bg-gray-50" readOnly /></div>
+                                            <div className="space-y-1"><label className="text-xs font-bold text-gray-500 uppercase">부서</label><input name="dept" defaultValue={empModal.data?.dept} className="w-full border rounded p-2 bg-gray-50" readOnly /></div>
+                                            <div className="space-y-1"><label className="text-xs font-bold text-gray-500 uppercase">직급</label><input name="position" defaultValue={empModal.data?.position} className="w-full border rounded p-2 bg-gray-50" readOnly /></div>
+                                        </div>
+                                        <div className="border-t pt-4">
+                                            <h4 className="font-bold text-blue-800 mb-3 text-sm"><i className="fas fa-passport mr-2"></i> 여권 정보 (HR Manager에서 관리)</h4>
+                                            <div className="grid grid-cols-3 gap-4 bg-blue-50 p-4 rounded-lg">
+                                                <div><label className="text-xs font-bold text-blue-600">번호</label><input required name="pp_number" defaultValue={empModal.data?.passport?.number} className="w-full border rounded p-2 bg-white" readOnly /></div>
+                                                <div><label className="text-xs font-bold text-blue-600">국가</label><input name="pp_country" defaultValue={empModal.data?.passport?.country || 'KR'} className="w-full border rounded p-2 bg-white" readOnly /></div>
+                                                <div><label className="text-xs font-bold text-blue-600">만료일</label><input required type="date" name="pp_expiry" defaultValue={empModal.data?.passport?.expiry} className="w-full border rounded p-2 bg-white" readOnly /></div>
+                                            </div>
+                                        </div>
+                                        <div className="flex justify-end pt-4 border-t gap-3">
+                                            <button type="button" onClick={() => setEmpModal({open:false, data:null})} className="px-6 py-2 rounded border hover:bg-gray-50">닫기</button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        )}
+                        {tripModal.open && <TripFormModal onClose={() => setTripModal({open: false, data: null})} onSave={handleSaveTripData} data={tripModal.data} employees={employees} />}
+                    </main>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
